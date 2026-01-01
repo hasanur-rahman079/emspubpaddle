@@ -1,0 +1,51 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-01-01T14:06:47-07:00\n"
+"PO-Revision-Date: 2026-01-01T14:06:47-07:00\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "plugins.paymethod.emspubpaddle.displayName"
+msgstr "Paddle Payment (EMS.pub)"
+
+msgid "plugins.paymethod.emspubpaddle.description"
+msgstr "EMS.pub Payment Plugin for accepting payments easily via Paddle."
+
+msgid "plugins.paymethod.emspubpaddle"
+msgstr "Paddle Fee Payment"
+
+msgid "plugins.paymethod.emspubpaddle.settings"
+msgstr "Paddle Payment Settings"
+
+msgid "plugins.paymethod.emspubpaddle.settings.testMode"
+msgstr "Test Mode"
+
+msgid "plugins.paymethod.emspubpaddle.settings.vendorId"
+msgstr "Vendor ID"
+
+msgid "plugins.paymethod.emspubpaddle.settings.apiKey"
+msgstr "API Key"
+
+msgid "plugins.paymethod.emspubpaddle.settings.clientToken"
+msgstr "Client Token (for Paddle.js)"
+
+msgid "plugins.paymethod.emspubpaddle.paymentSuccess"
+msgstr "Payment Successful"
+
+msgid "plugins.paymethod.emspubpaddle.purchase.success"
+msgstr "Your payment was successful. You can now continue."
+
+msgid "plugins.paymethod.emspubpaddle.paymentCancelled"
+msgstr "Payment Cancelled"
+
+msgid "plugins.paymethod.emspubpaddle.purchase.cancelled"
+msgstr "Your payment was cancelled."
+
+msgid "plugins.paymethod.emspubpaddle.error"
+msgstr "A transaction error occurred. Please contact the journal manager for details."
