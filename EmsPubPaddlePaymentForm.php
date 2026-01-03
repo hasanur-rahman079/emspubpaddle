@@ -137,9 +137,12 @@ class EmsPubPaddlePaymentForm extends Form
                 throw new \Exception($responseData['error']['detail'] ?? 'Failed to create transaction');
             }
 
-            // Redirect to My Invoices page after successful payment
-            // Include queuedPaymentId as a query param so Paddle appends transaction_id with & correctly
-            $successUrl = $request->url(null, 'emspubcore', 'pendingPayments', null, ['paid' => $this->_queuedPayment->getId()]);
+            // CRITICAL FIX: Route through the payment plugin's handle() method
+            // This ensures fulfillQueuedPayment() is called to mark the payment complete
+            // The handle() method will verify the transaction and update the completed_payments table
+            $successUrl = $request->url(null, 'payment', 'plugin', [$this->_plugin->getName(), 'return'], [
+                'queuedPaymentId' => $this->_queuedPayment->getId()
+            ]);
             $cancelUrl = $request->url(null, 'emspubcore', 'pendingPayments', null, ['cancelled' => 1]);
 
             $templateMgr = TemplateManager::getManager($request);

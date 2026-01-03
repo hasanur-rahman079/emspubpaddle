@@ -235,9 +235,11 @@ class EmsPubPaddlePlugin extends PaymethodPlugin
             if ($transaction && ($transaction['status'] === 'completed' || $transaction['status'] === 'paid')) {
                 $paymentManager->fulfillQueuedPayment($request, $queuedPayment, $this->getName());
                 
+                // Show success template with link to My Invoices page
+                $pendingPaymentsUrl = $request->url(null, 'emspubcore', 'pendingPayments');
                 $templateMgr = TemplateManager::getManager($request);
                 $templateMgr->assign([
-                    'backLink' => $dashboardUrl,
+                    'backLink' => $pendingPaymentsUrl,
                     'itemName' => $itemName,
                     'amount' => $amount,
                     'currency' => $currency,
