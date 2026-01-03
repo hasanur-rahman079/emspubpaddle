@@ -24,9 +24,9 @@ use PKP\config\Config;
 use PKP\db\DAORegistry;
 use PKP\plugins\Hook;
 use PKP\plugins\PaymethodPlugin;
-use Paddle\Sdk\Environment;
-use Paddle\Sdk\Sdk;
-use Paddle\Sdk\Options;
+use Paddle\SDK\Environment;
+use Paddle\SDK\Client as PaddleClient;
+use Paddle\SDK\Options as PaddleOptions;
 
 require_once(dirname(__FILE__) . '/vendor/autoload.php');
 
@@ -223,14 +223,16 @@ class EmsPubPaddlePlugin extends PaymethodPlugin
 
             // Initialize SDK
             $apiKey = $this->getSetting($journal->getId(), 'paddleApiKey');
-            $environment = $this->getSetting($journal->getId(), 'paddleTestMode') ? Environment::Sandbox() : Environment::Production();
+            $environment = $this->getSetting($journal->getId(), 'paddleTestMode') ? Environment::SANDBOX : Environment::PRODUCTION;
             
-            $paddle = new Sdk($apiKey, $environment);
+            $paddle = new PaddleClient($apiKey, new PaddleOptions($environment));
             
             // Verify transaction
-            $transaction = $paddle->transactions->get($transactionId);
+            $response = $paddle->getRaw("/transactions/{$transactionId}");
+            $responseData = json_decode($response->getBody()->getContents(), true);
+            $transaction = $responseData['data'] ?? null;
 
-            if ($transaction && ($transaction->status->value === 'completed' || $transaction->status->value === 'paid')) {
+            if ($transaction && ($transaction['status'] === 'completed' || $transaction['status'] === 'paid')) {
                 $paymentManager->fulfillQueuedPayment($request, $queuedPayment, $this->getName());
                 
                 $templateMgr = TemplateManager::getManager($request);
@@ -243,7 +245,7 @@ class EmsPubPaddlePlugin extends PaymethodPlugin
                 $templateMgr->display($this->getTemplateResource('paymentSuccess.tpl'));
                 return;
             } else {
-                 throw new \Exception('Payment status is not completed. Status: ' . ($transaction->status->value ?? 'unknown'));
+                 throw new \Exception('Payment status is not completed. Status: ' . ($transaction['status'] ?? 'unknown'));
             }
 
         } catch (\Exception $e) {

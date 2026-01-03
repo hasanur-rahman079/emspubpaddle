@@ -12,7 +12,7 @@
 <version>
 	<application>emspubpaddle</application>
 	<type>plugins.paymethod</type>
-	<release>1.0.0.0</release>
+	<release>1.0.0.1</release>
 	<date>2026-01-01</date>
 	<class>APP\plugins\paymethod\emspubpaddle\EmsPubPaddlePlugin</class>
 </version>

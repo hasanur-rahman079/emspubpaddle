@@ -20,6 +20,8 @@ use PKP\config\Config;
 use PKP\form\Form;
 use PKP\payment\QueuedPayment;
 
+require_once(dirname(__FILE__) . '/vendor/autoload.php');
+
 class EmsPubPaddlePaymentForm extends Form
 {
     /** @var EmsPubPaddlePlugin */
@@ -54,96 +56,108 @@ class EmsPubPaddlePaymentForm extends Form
         $journal = $request->getJournal();
         $paymentManager = Application::get()->getPaymentManager($journal);
         
-        $vendorId = $this->_plugin->getSetting($journal->getId(), 'paddleVendorId');
+        $apiKey = $this->_plugin->getSetting($journal->getId(), 'paddleApiKey');
         $clientToken = $this->_plugin->getSetting($journal->getId(), 'paddleClientToken');
         $isTestMode = $this->_plugin->getSetting($journal->getId(), 'paddleTestMode');
 
-        $successUrl = $request->url(null, 'payment', 'plugin', [$this->_plugin->getName(), 'return'], ['queuedPaymentId' => $this->_queuedPayment->getId()]);
-        $cancelUrl = $request->url(null, 'payment', 'plugin', [$this->_plugin->getName(), 'return'], ['queuedPaymentId' => $this->_queuedPayment->getId(), 'status' => 'cancel']);
+        if (!$apiKey || !$clientToken) {
+            echo 'Paddle gateway not configured.';
+            exit;
+        }
 
-        // Paddle Billing (v2) prefers initializing via Paddle.js
-        // We will output a small bridge page that opens Paddle Checkout
-        
-        $templateMgr = TemplateManager::getManager($request);
-        
-        $paddleData = [
-            'clientToken' => $clientToken,
-            'environment' => $isTestMode ? 'sandbox' : 'production',
-            'items' => [
-                [
-                    'price' => [
-                        'description' => $paymentManager->getPaymentName($this->_queuedPayment),
-                        'unit_price' => [
-                            'amount' => (int)($this->_queuedPayment->getAmount() * 100), // Minor units? Paddle v2 typically uses major units but SDK/API differs. 
-                            // Actually Paddle v2 Price objects use decimal but Checkout sometimes expects integers in minor units if using "manually".
-                            // Let's check Paddle.js v2 docs.
-                            'currency_code' => $this->_queuedPayment->getCurrencyCode(),
-                        ],
-                        'custom_data' => [
-                            'queued_payment_id' => $this->_queuedPayment->getId(),
-                        ],
-                    ],
-                    'quantity' => 1,
-                ]
-            ],
-            'successUrl' => $successUrl . '&transaction_id={transaction_id}',
-            'cancelUrl' => $cancelUrl,
-        ];
+        try {
+            // Initialize SDK
+            $environment = $isTestMode ? \Paddle\SDK\Environment::SANDBOX : \Paddle\SDK\Environment::PRODUCTION;
+            $paddle = new \Paddle\SDK\Client($apiKey, new \Paddle\SDK\Options($environment));
 
-        // For simplicity, we'll use a hidden auto-submitting view or just a simple page with Paddle.js
-        // But since this is a "Form" display in OJS, we can just output HTML.
+            // Create an ad-hoc Transaction for the APC/Fee
+            // Consistent with emspubcore: use cents and postRaw
+            $amountCents = (int) round($this->_queuedPayment->getAmount() * 100);
+            $itemName = $paymentManager->getPaymentName($this->_queuedPayment);
 
-        echo '<!DOCTYPE html>
-<html>
-<head>
-    <title>Redirecting to Payment...</title>
-    <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
-    <style>
-        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f9f9f9; }
-        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 2s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    </style>
-</head>
-<body>
-    <div style="text-align: center;">
-        <div class="loader" style="margin: 0 auto 20px;"></div>
-        <p>Connecting to Paddle...</p>
-    </div>
-
-    <script type="text/javascript">
-        Paddle.Environment.set("' . $paddleData['environment'] . '");
-        Paddle.Setup({ 
-            token: "' . $paddleData['clientToken'] . '"
-        });
-
-        Paddle.Checkout.open({
-            settings: {
-                displayMode: "overlay",
-                theme: "light",
-                locale: "en",
-                successUrl: "' . $paddleData['successUrl'] . '"
-            },
-            items: [{
-                priceId: null, // We are creating a custom price below? No, Paddle v2 usually wants a Price ID.
-                // However, we can use "custom" items if enabled. 
-                // Alternatively, we create a one-time transaction.
-            }],
-            customData: {
-                queuedPaymentId: ' . $this->_queuedPayment->getId() . '
-            },
-            // Since we don\'t have a Price ID from Paddle Dashboard (dynamic APC), 
-            // we might need to use the "unmapped" price or use the Product/Price API first.
-            // For now, let\'s assume the user has a generic APC product and we pass the amount.
-            // Wait, Paddle v2 "open" doesn\'t easily allow arbitrary amounts without a Price ID.
+            // Fetch journal-specific Product ID for APC from emspubcore plugin settings
+            // Try to load emspubcore plugin (may be site-wide)
+            \PKP\plugins\PluginRegistry::loadCategory('generic', true, 0);
+            $emspubcorePlugin = \PKP\plugins\PluginRegistry::getPlugin('generic', 'emspubcore');
+            $productId = null;
             
-            // FALLBACK: If we can\'t use dynamic prices easily in overlay, 
-            // we should have pre-created prices or use the Transaction API to get a checkout URL.
-        });
-        
-        // Let\'s use a more robust approach: Create a transaction server-side and then open it.
-    </script>
-</body>
-</html>';
-        exit;
+            if ($emspubcorePlugin) {
+                $productId = $emspubcorePlugin->getSetting($journal->getId(), 'paddleApcProductId');
+            }
+            
+            // Fallback: Read directly from plugin_settings table if plugin not found
+            if (!$productId) {
+                $pluginSettingsDao = \PKP\db\DAORegistry::getDAO('PluginSettingsDAO');
+                $productId = $pluginSettingsDao->getSetting($journal->getId(), 'emspubcoreplugin', 'paddleApcProductId');
+            }
+            
+            error_log('Paddle APC: productId from settings: ' . ($productId ?: 'null'));
+
+            if (!$productId) {
+                error_log('Paddle Transaction Creation Failed for ' . $itemName . ': No Product ID found for APC in journal settings.');
+                throw new \Exception('Paddle gateway not fully configured for this journal (missing Product ID for APC). Please set the Product ID in Payment Types settings.');
+            }
+
+            $response = $paddle->postRaw('/transactions', [
+                'items' => [
+                    [
+                        'price' => [
+                            'description' => $itemName,
+                            'name' => 'Journal Payment',
+                            'tax_mode' => 'external',
+                            'unit_price' => [
+                                'amount' => (string) $amountCents,
+                                'currency_code' => $this->_queuedPayment->getCurrencyCode(),
+                            ],
+                            'product_id' => $productId,
+                            'quantity' => [
+                                'minimum' => 1,
+                                'maximum' => 1
+                            ],
+                            'custom_data' => [
+                                'queued_payment_id' => (string)$this->_queuedPayment->getId(),
+                                'type' => 'ad_hoc'
+                            ]
+                        ],
+                        'quantity' => 1
+                    ]
+                ],
+                'custom_data' => [
+                    'queued_payment_id' => (string)$this->_queuedPayment->getId(),
+                    'journal_id' => (string)$journal->getId(),
+                    'type' => 'apc_payment'
+                ]
+            ]);
+
+            $responseData = json_decode($response->getBody()->getContents(), true);
+            $transactionId = $responseData['data']['id'] ?? null;
+
+            if (!$transactionId) {
+                error_log('Paddle Transaction Creation Failed for ' . $itemName . ': ' . print_r($responseData, true));
+                throw new \Exception($responseData['error']['detail'] ?? 'Failed to create transaction');
+            }
+
+            // Redirect to My Invoices page after successful payment
+            // Include queuedPaymentId as a query param so Paddle appends transaction_id with & correctly
+            $successUrl = $request->url(null, 'emspubcore', 'pendingPayments', null, ['paid' => $this->_queuedPayment->getId()]);
+            $cancelUrl = $request->url(null, 'emspubcore', 'pendingPayments', null, ['cancelled' => 1]);
+
+            $templateMgr = TemplateManager::getManager($request);
+            $templateMgr->assign([
+                'paddleEnv' => $isTestMode ? 'sandbox' : 'production',
+                'paddleClientToken' => $clientToken,
+                'transactionId' => $transactionId,
+                'successUrl' => $successUrl,
+                'cancelUrl' => $cancelUrl,
+            ]);
+
+            $templateMgr->display($this->_plugin->getTemplateResource('paddleLauncher.tpl'));
+            exit;
+
+        } catch (\Exception $e) {
+            error_log('Paddle Transaction Creation Error: ' . $e->getMessage());
+            echo 'Error connecting to payment gateway: ' . htmlspecialchars($e->getMessage());
+            exit;
+        }
     }
 }
